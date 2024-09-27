@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+aio-pika
+docker 
+requests

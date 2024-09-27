@@ -1,0 +1,107 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+*.wheel
+
+# PyInstaller
+# Usually these files are written by a python script from a template
+# before PyInstaller builds the binary
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.cache/
+coverage.xml
+*.cover
+.hypothesis/
+*.pytest_cache/
+nosetests.xml
+coverage/
+*.cover
+*.pyo
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# PyCharm specific
+.idea/
+*.iml
+
+# VS Code specific
+.vscode/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Docker-specific
+docker-compose.yml
+.dockerignore
+
+# Temporary files and logs
+*.log
+*.tmp
+*.temp
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# Sphinx documentation
+docs/_build/
+
+# Pyenv
+.python-version
+
+# Editor-specific
+*.swp
+*.swo
+*.swn
+*~
+.vscode/
+.idea/
+
+# Other
+*.tar
