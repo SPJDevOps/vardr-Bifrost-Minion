@@ -2,10 +2,7 @@ import os
 import re
 import requests
 import tarfile
-import json
 import xml.etree.ElementTree as ET
-from urllib.parse import urljoin
-from aio_pika import Message
 
 from app.helpers.nifi_uploader import NiFiUploader
 from app.helpers.status_publisher import publish_status_update

@@ -1,5 +1,5 @@
 import os
-import subprocess
+import requests
 import tarfile
 
 from app.helpers.nifi_uploader import NiFiUploader
@@ -7,23 +7,23 @@ from app.helpers.status_publisher import publish_status_update
 from app.models.download_status import DownloadStatus
 from app.models.hyperloop_download import HyperloopDownload
 
-class PythonPackageProcessor:
+class FileDownloadProcessor:
     def __init__(self, rabbitmq, status_queue):
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
-        self.temp_dir = "/tmp/python-packages/"  # Directory to store downloaded wheels
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")
+        self.temp_dir = "/tmp/file-downloads/"  # Directory to store downloaded files
+        self.tarball_sender = NiFiUploader("http://localhost:9998/")  # Initialize TarballSender
 
         # Ensure the temp directory exists
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
 
     async def process(self, download: HyperloopDownload):
-        # Step 1: Download the Python package
+        # Download step
         await self.download_step(download)
-        # Step 2: Add to tarball
+        # Packaging step
         await self.packaging_step(download)
-        # Step 3: Send tarball to HTTP endpoint
+        # Sending step
         await self.sending_step(download)
 
     def sanitize_filename(self, filename: str) -> str:
@@ -31,50 +31,52 @@ class PythonPackageProcessor:
         return filename.replace("/", "_").replace(":", "_")
 
     async def download_step(self, download: HyperloopDownload):
-        """Download Python package as .whl files using pip."""
-        package_name = download.dependency
-        sanitized_name = self.sanitize_filename(package_name)
-        download_dir = os.path.join(self.temp_dir, sanitized_name)
+        """Download the file from the provided URL."""
+        # Set the status to DOWNLOADING
+        download.status = DownloadStatus.DOWNLOADING
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
 
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
+        url = download.dependency  # The URL to download
+        file_name = os.path.basename(url)
+        sanitized_name = self.sanitize_filename(file_name)
+        download_path = os.path.join(self.temp_dir, sanitized_name)
 
-        print(f"Step 1: Downloading Python package {package_name} and its dependencies...")
+        print(f"Downloading file from {url}...")
 
         try:
-            # Use pip to download the package and its dependencies for Python 3.11 without installing
-            subprocess.run(
-                ["pip", "download", package_name, "--python-version", "3.11", "--dest", download_dir],
-                check=True
-            )
-            print(f"Python package {package_name} downloaded successfully.")
-        except subprocess.CalledProcessError as e:
-            print(f"Error downloading Python package {package_name}: {e}")
+            # Download the file from the URL
+            response = requests.get(url)
+            response.raise_for_status()  # Raise an exception for HTTP errors
+
+            # Save the downloaded file to the temp directory
+            with open(download_path, "wb") as file:
+                file.write(response.content)
+            print(f"File downloaded and saved as {download_path}.")
+        except requests.RequestException as e:
+            print(f"Error downloading file from {url}: {e}")
             download.status = DownloadStatus.FAILED
             await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
 
-        # Set the status to DOWNLOADING
-        download.status = DownloadStatus.DOWNLOADING
-        download.package_dir = download_dir  # Save the package directory for later use
-        await publish_status_update(self.rabbitmq, self.status_queue, download)
+        download.package_dir = download_path  # Save the download path for later use
+
 
     async def packaging_step(self, download: HyperloopDownload):
-        """Create a tarball of the downloaded .whl files."""
-        package_name = download.dependency
-        sanitized_name = self.sanitize_filename(package_name)
+        """Create a tarball of the downloaded file."""
+        file_name = os.path.basename(download.package_dir)
+        sanitized_name = self.sanitize_filename(file_name)
         tarball_name = f"{sanitized_name}.tar"
         tarball_path = os.path.join(self.temp_dir, tarball_name)
 
-        print(f"Step 2: Creating tarball for Python package {package_name}...")
+        print(f"Creating tarball for downloaded file {file_name}...")
 
         try:
-            # Create the tarball from the downloaded wheel files
+            # Create the tarball from the downloaded file
             with tarfile.open(tarball_path, "w") as tarball:
                 tarball.add(download.package_dir, arcname=os.path.basename(download.package_dir))
-            print(f"Tarball created at {tarball_path}")
+            print(f"Tarball created at {tarball_path}.")
         except Exception as e:
-            print(f"Error creating tarball for {package_name}: {e}")
+            print(f"Error creating tarball for {file_name}: {e}")
             download.status = DownloadStatus.FAILED
             await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
@@ -91,7 +93,7 @@ class PythonPackageProcessor:
         tarball_path = download.tarball_path
 
         try:
-            # Use the TarballSender to send the tarball, passing both dependency and type
+            # Use the TarballSender to send the tarball, passing both dependency (URL) and type
             response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
@@ -100,5 +102,5 @@ class PythonPackageProcessor:
         except Exception as e:
             download.status = DownloadStatus.FAILED
 
-        # Publish the final status
+        # Publish the final status using the common status publisher
         await publish_status_update(self.rabbitmq, self.status_queue, download)

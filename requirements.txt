@@ -3,3 +3,4 @@ uvicorn
 aio-pika
 docker 
 requests
+pyyaml

@@ -1,9 +1,6 @@
-import json
 import os
 import re
-from aio_pika import Message
 import docker
-import requests
 
 from app.helpers.nifi_uploader import NiFiUploader
 from app.helpers.status_publisher import publish_status_update
@@ -92,4 +89,3 @@ class DockerProcessor:
 
         # Publish the final status
         await publish_status_update(self.rabbitmq, self.status_queue, download)
-        
