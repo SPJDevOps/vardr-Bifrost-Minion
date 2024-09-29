@@ -199,13 +199,13 @@ The application uses RabbitMQ for message passing between components.
 
 #### Queues
 
-- **queue1**: Receives new `HyperloopDownload` tasks.
+- **request_queue**: Receives new `HyperloopDownload` tasks.
 - **status_queue**: Receives status updates from processors.
 
 #### Message Flow
 
-1. **Producer**: Sends `HyperloopDownload` messages to `queue1`.
-2. **Consumer**: Listens to `queue1` and dispatches tasks to the appropriate processor based on the `type` field.
+1. **Producer**: Sends `HyperloopDownload` messages to `request_queue`.
+2. **Consumer**: Listens to `request_queue` and dispatches tasks to the appropriate processor based on the `type` field.
 3. **Processor**: Processes the task and sends status updates to `status_queue`.
 
 ---
@@ -216,7 +216,7 @@ To use the application:
 
 1. **Send a `HyperloopDownload` task**:
 
-   Send a message to `queue1` or make an HTTP POST request to the `/downloads` endpoint (if available) with a JSON payload:
+   Send a message to `request_queue` or make an HTTP POST request to the `/downloads` endpoint (if available) with a JSON payload:
 
    ```json
    {

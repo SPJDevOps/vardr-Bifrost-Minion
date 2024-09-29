@@ -1,5 +1,6 @@
 # app/main.py
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.rabbitmq.rabbitmq import RabbitMQ
 from app.rabbitmq.rabbit_consumer import Consumer
@@ -10,15 +11,17 @@ rabbitmq = RabbitMQ("amqp://guest:guest@localhost:5672/")  # Adjust the URL as n
 consumer = Consumer(rabbitmq, 'private.hyperloop.download_requests', 'private.hyperloop.download_status')
 publisher = Publisher(rabbitmq)
 
-@app.on_event("startup")
-async def startup_event():
+# Define an async context manager for handling startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup event
     await rabbitmq.connect()
-    # Start the consumer in the background
     asyncio.create_task(consumer.start_consuming())
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    yield
+    # Shutdown event
     await rabbitmq.close()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def read_root():
