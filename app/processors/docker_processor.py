@@ -5,6 +5,8 @@ from aio_pika import Message
 import docker
 import requests
 
+from app.helpers.nifi_uploader import NiFiUploader
+from app.helpers.status_publisher import publish_status_update
 from app.models.download_status import DownloadStatus
 from app.models.hyperloop_download import HyperloopDownload
 
@@ -14,6 +16,11 @@ class DockerProcessor:
         self.status_queue = status_queue
         self.docker_client = docker.from_env()
         self.temp_dir = "/tmp/docker-images/"
+        self.tarball_sender = NiFiUploader("http://localhost:9998/")
+
+        # Ensure the directory exists
+        if not os.path.exists(self.temp_dir):
+            os.makedirs(self.temp_dir)
 
 
     async def process(self, download: HyperloopDownload):
@@ -30,7 +37,7 @@ class DockerProcessor:
     async def download_step(self, download: HyperloopDownload):
         print(f"Executing step 1 for {download.type}...")
         download.status = DownloadStatus.DOWNLOADING
-        await self.publish_status_update(download)
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
         docker_image = download.dependency
         print(f"Step 1: Pulling Docker image {docker_image}...")
 
@@ -40,14 +47,14 @@ class DockerProcessor:
         except docker.errors.APIError as e:
             print(f"Error pulling Docker image {docker_image}: {e}")
             download.status = DownloadStatus.FAILED
-            await self.publish_status_update(download)
+            await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
         
 
     async def packaging_step(self, download: HyperloopDownload):
         print(f"Executing step 2 for {download.type}...")
         download.status = DownloadStatus.SENDING
-        await self.publish_status_update(download)
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
         docker_image = download.dependency
         sanitized_name = self.sanitize_filename(docker_image)
         tarball_name = f"{sanitized_name}.tar"
@@ -72,34 +79,17 @@ class DockerProcessor:
         download.tarball_path = tarball_path
 
     async def sending_step(self, download: HyperloopDownload):
-        # Send the tarball to the HTTP endpoint
-        tarball_name = download.tarball_path
-        endpoint_url = "http://localhost:9998/"
-        headers = {"hyperloop.dependency": download.dependency, "hyperloop.type": download.type}
-        print(f"Step 3: Sending tarball {tarball_name} to {endpoint_url} with dependency {download.dependency}...")
-
+        # Use the TarballSender to send the tarball, passing both dependency and type
+        tarball_path = download.tarball_path
         try:
-            with open(tarball_name, "rb") as tarball:
-                # Send the tarball via HTTP POST
-                response = requests.post(endpoint_url, headers=headers, files={"file": tarball})
-
+            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
             if response.status_code == 200:
-                print(f"Tarball {tarball_name} sent successfully!")
                 download.status = DownloadStatus.DONE
             else:
-                print(f"Failed to send tarball: {response.status_code}, {response.text}")
                 download.status = DownloadStatus.FAILED
         except Exception as e:
-            print(f"Error sending tarball: {e}")
             download.status = DownloadStatus.FAILED
 
         # Publish the final status
-        await self.publish_status_update(download)
-
-    async def publish_status_update(self, download: HyperloopDownload):
-        message_body = json.dumps(download.to_dict())
-        await self.rabbitmq.channel.default_exchange.publish(
-            Message(body=message_body.encode()),
-            routing_key=self.status_queue
-        )
-        print(f"Published to {self.status_queue} with status: {download.status}")
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
+        

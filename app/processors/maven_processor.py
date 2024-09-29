@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urljoin
 from aio_pika import Message
 
+from app.helpers.nifi_uploader import NiFiUploader
+from app.helpers.status_publisher import publish_status_update
 from app.models.download_status import DownloadStatus
 from app.models.hyperloop_download import HyperloopDownload
 
@@ -16,6 +18,7 @@ class MavenProcessor:
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
         self.maven_base_url = "https://repo1.maven.org/maven2/"
+        self.tarball_sender = NiFiUploader("http://localhost:9998/")
         self.downloaded_artifacts = set()  # To avoid re-downloading the same artifact
 
     async def process(self, download: HyperloopDownload):
@@ -149,7 +152,7 @@ class MavenProcessor:
 
     async def download_step(self, download: HyperloopDownload):
         download.status = DownloadStatus.DOWNLOADING
-        await self.publish_status_update(download)
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
         # Download Maven artifact using the value of HyperloopDownload.dependency
         group_id, artifact_id, version = download.dependency.split(':')
         dest_folder = f"maven_artifacts_{self.sanitize_filename(download.dependency)}"
@@ -170,7 +173,7 @@ class MavenProcessor:
         except Exception as e:
             print(f"Error downloading Maven artifact {download.dependency}: {e}")
             download.status = DownloadStatus.FAILED
-            await self.publish_status_update(download)
+            await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
 
 
@@ -191,7 +194,7 @@ class MavenProcessor:
         except Exception as e:
             print(f"Error saving Maven dependency to tarball: {e}")
             download.status = DownloadStatus.FAILED
-            await self.publish_status_update(download)
+            await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
 
         # Attach the tarball name to the download object
@@ -199,39 +202,19 @@ class MavenProcessor:
 
         # Set the status to SENDING
         download.status = DownloadStatus.SENDING
-        await self.publish_status_update(download)
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
 
     async def sending_step(self, download: HyperloopDownload):
-        # Send the tarball to the HTTP endpoint
-        tarball_name = download.tarball_path
-        endpoint_url = "http://localhost:9998/"
-        headers = {"hyperloop.dependency": download.dependency, "hyperloop.type": download.type}
-        print(f"Step 3: Sending tarball {tarball_name} to {endpoint_url} with dependency {download.dependency}...")
-
+        # Use the TarballSender to send the tarball, passing both dependency and type
+        tarball_path = download.tarball_path
         try:
-            with open(tarball_name, "rb") as tarball:
-                # Send the tarball via HTTP POST
-                response = requests.post(endpoint_url, headers=headers, files={"file": tarball})
-
+            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
             if response.status_code == 200:
-                print(f"Tarball {tarball_name} sent successfully!")
                 download.status = DownloadStatus.DONE
             else:
-                print(f"Failed to send tarball: {response.status_code}, {response.text}")
                 download.status = DownloadStatus.FAILED
         except Exception as e:
-            print(f"Error sending tarball: {e}")
             download.status = DownloadStatus.FAILED
 
         # Publish the final status
-        await self.publish_status_update(download)
-
-    async def publish_status_update(self, download: HyperloopDownload):
-        # Convert the object to a dictionary and serialize it to JSON
-        message_body = json.dumps(download.to_dict())
-        # Publish to queue2
-        await self.rabbitmq.channel.default_exchange.publish(
-            Message(body=message_body.encode()),  # Convert string to bytes
-            routing_key=self.status_queue
-        )
-        print(f"Published to {self.status_queue} with status: {download.status}")
+        await publish_status_update(self.rabbitmq, self.status_queue, download)
