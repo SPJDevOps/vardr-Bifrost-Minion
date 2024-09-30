@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import requests
 import tarfile
 import xml.etree.ElementTree as ET
@@ -17,6 +18,11 @@ class MavenProcessor:
         self.maven_base_url = "https://repo1.maven.org/maven2/"
         self.tarball_sender = NiFiUploader("http://localhost:9998/")
         self.downloaded_artifacts = set()  # To avoid re-downloading the same artifact
+        self.temp_dir = "/tmp/maven-packages/"  # Directory to store downloaded artifacts
+
+        # Ensure the temp directory exists
+        if not os.path.exists(self.temp_dir):
+            os.makedirs(self.temp_dir)
 
     async def process(self, download: HyperloopDownload):
         # Step 1: Download the Maven artifact
@@ -25,6 +31,7 @@ class MavenProcessor:
         await self.packaging_step(download)
         # Step 3: Send tarball to HTTP endpoint
         await self.sending_step(download)
+        self.cleanup_temp_files(download)
 
     def sanitize_filename(self, filename: str) -> str:
         # Replace forward slashes, colons, and any non-alphanumeric characters with underscores
@@ -152,19 +159,21 @@ class MavenProcessor:
         await publish_status_update(self.rabbitmq, self.status_queue, download)
         # Download Maven artifact using the value of HyperloopDownload.dependency
         group_id, artifact_id, version = download.dependency.split(':')
-        dest_folder = f"maven_artifacts_{self.sanitize_filename(download.dependency)}"
+        # Create a dedicated temp directory for the artifact
+        sanitized_dependency = self.sanitize_filename(download.dependency)
+        download_dir = os.path.join(self.temp_dir, sanitized_dependency)
 
-        if not os.path.exists(dest_folder):
-            os.makedirs(dest_folder)
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
 
         print(f"Step 1: Downloading Maven artifact {download.dependency}...")
 
         try:
             # Download the main artifact (JAR and POM)
-            jar_file, pom_file = self.download_maven_artifact(group_id, artifact_id, version, dest_folder)
+            jar_file, pom_file = self.download_maven_artifact(group_id, artifact_id, version, download_dir)
 
             # Parse the POM and download all sub-dependencies
-            self.parse_pom_and_download_dependencies(pom_file, dest_folder)
+            self.parse_pom_and_download_dependencies(pom_file, download_dir)
 
             print(f"Maven artifact {download.dependency} downloaded successfully with dependencies.")
         except Exception as e:
@@ -172,22 +181,23 @@ class MavenProcessor:
             download.status = DownloadStatus.FAILED
             await publish_status_update(self.rabbitmq, self.status_queue, download)
             return
+        
+        download.package_dir = download_dir
 
 
     async def packaging_step(self, download: HyperloopDownload):
         # Create a tarball for the Maven dependency
-        sanitized_name = self.sanitize_filename(download.dependency)
-        tarball_name = f"{sanitized_name}.tar"
-        dest_folder = f"maven_artifacts_{sanitized_name}"
+        sanitized_dependency = self.sanitize_filename(download.dependency)
+        tarball_name = f"{sanitized_dependency}.tar"
+        tarball_path = os.path.join(self.temp_dir, tarball_name)
 
         print(f"Step 2: Saving Maven artifact and dependencies to tarball {tarball_name}...")
 
         try:
             # Create a tarball of the artifact directory
-            with tarfile.open(tarball_name, "w") as tarball:
-                tarball.add(dest_folder, arcname=os.path.basename(dest_folder))
-
-            print(f"Maven dependency {download.dependency} saved to tarball {tarball_name}.")
+            with tarfile.open(tarball_path, "w") as tarball:
+                tarball.add(download.package_dir, arcname=os.path.basename(download.package_dir))
+            print(f"Tarball created at {tarball_path}.")
         except Exception as e:
             print(f"Error saving Maven dependency to tarball: {e}")
             download.status = DownloadStatus.FAILED
@@ -215,3 +225,17 @@ class MavenProcessor:
 
         # Publish the final status
         await publish_status_update(self.rabbitmq, self.status_queue, download)
+    
+    def cleanup_temp_files(self, download: HyperloopDownload):
+        """Clean up the temporary files and directories after processing."""
+        try:
+            # Remove the download directory (contains the downloaded files)
+            if hasattr(download, 'package_dir') and os.path.exists(download.package_dir):
+                print(f"Cleaning up Maven package directory at {download.package_dir}")
+                shutil.rmtree(download.package_dir)
+            # Remove the tarball
+            if hasattr(download, 'tarball_path') and os.path.exists(download.tarball_path):
+                print(f"Removing tarball at {download.tarball_path}")
+                os.remove(download.tarball_path)
+        except Exception as e:
+            print(f"Error during cleanup of temporary files: {e}")

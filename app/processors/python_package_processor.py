@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tarfile
 
@@ -25,6 +26,7 @@ class PythonPackageProcessor:
         await self.packaging_step(download)
         # Step 3: Send tarball to HTTP endpoint
         await self.sending_step(download)
+        self.cleanup_temp_files(download)
 
     def sanitize_filename(self, filename: str) -> str:
         """Sanitize the filename for safe file saving."""
@@ -102,3 +104,17 @@ class PythonPackageProcessor:
 
         # Publish the final status
         await publish_status_update(self.rabbitmq, self.status_queue, download)
+
+    def cleanup_temp_files(self, download: HyperloopDownload):
+        """Clean up the temporary files and directories after processing."""
+        try:
+            # Remove the package directory
+            if os.path.exists(download.package_dir):
+                print(f"Cleaning up package directory at {download.package_dir}")
+                shutil.rmtree(download.package_dir)
+            # Remove the tarball file
+            if os.path.exists(download.tarball_path):
+                print(f"Removing tarball at {download.tarball_path}")
+                os.remove(download.tarball_path)
+        except Exception as e:
+            print(f"Error during cleanup of temporary files: {e}")

@@ -24,6 +24,7 @@ class DockerProcessor:
         await self.download_step(download)
         await self.packaging_step(download)
         await self.sending_step(download)
+        self.cleanup_temp_files(download)
 
 
     def sanitize_filename(self, filename: str) -> str:
@@ -89,3 +90,19 @@ class DockerProcessor:
 
         # Publish the final status
         await publish_status_update(self.rabbitmq, self.status_queue, download)
+
+    def cleanup_temp_files(self, download: HyperloopDownload):
+        """Clean up the temporary files and Docker images after processing."""
+        try:
+            # Remove the tarball file
+            if os.path.exists(download.tarball_path):
+                print(f"Removing tarball at {download.tarball_path}")
+                os.remove(download.tarball_path)
+            # Remove the Docker image if desired
+            image = self.docker_client.images.get(download.dependency)
+            self.docker_client.images.remove(image.id)
+            print(f"Docker image {download.dependency} removed.")
+        except docker.errors.ImageNotFound:
+            print(f"Docker image {download.dependency} not found, skipping removal.")
+        except Exception as e:
+            print(f"Error during cleanup: {e}")

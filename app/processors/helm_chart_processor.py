@@ -177,3 +177,12 @@ class HelmChartProcessor:
 
         # Publish the final status using the common status publisher
         await publish_status_update(self.rabbitmq, self.status_queue, download)
+    
+    def cleanup_temp_files(self, download: HyperloopDownload):
+        """Clean up the temporary files and directories after processing."""
+        try:
+            if os.path.exists(download.package_dir):
+                print(f"Cleaning up temporary files at {download.package_dir}")
+                shutil.rmtree(download.package_dir)
+        except Exception as e:
+            print(f"Error during cleanup of temporary files: {e}")
