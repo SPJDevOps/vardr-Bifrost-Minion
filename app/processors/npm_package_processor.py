@@ -14,7 +14,7 @@ class NpmPackageProcessor:
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
         self.temp_dir = "/tmp/npm-packages/"  # Directory to store downloaded NPM tarballs
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")  # Initialize TarballSender
+        self.tarball_sender = NiFiUploader()  # Initialize TarballSender
 
         # Ensure the temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -50,12 +50,37 @@ class NpmPackageProcessor:
         print(f"Step 1: Downloading NPM package {package_name} and its dependencies...")
 
         try:
-            # Use npm pack to download the tarball for the package and its subdependencies
+            # Step 1: Use npm pack to download the tarball for the main package
             subprocess.run(
-                ["npm", "pack", package_name, "--prefix", download_dir],
-                check=True
+                ["npm", "pack", package_name],
+                check=True,
+                cwd=download_dir
             )
             print(f"NPM package {package_name} downloaded successfully.")
+
+            # Step 2: Install the main package to get its dependencies
+            subprocess.run(
+                ["npm", "install", package_name, "--no-save"],
+                check=True,
+                cwd=download_dir
+            )
+
+            # Step 3: Iterate through node_modules and pack each sub-dependency
+            node_modules_dir = os.path.join(download_dir, "node_modules")
+            if os.path.exists(node_modules_dir):
+                for sub_package in os.listdir(node_modules_dir):
+                    sub_package_dir = os.path.join(node_modules_dir, sub_package)
+
+                    # Handle the case where there may be a scope (e.g., @scope/package)
+                    if os.path.isdir(sub_package_dir):
+                        if sub_package.startswith("@"):
+                            # For scoped packages, you need to go one level deeper
+                            for scoped_sub_package in os.listdir(sub_package_dir):
+                                scoped_sub_package_dir = os.path.join(sub_package_dir, scoped_sub_package)
+                                self.pack_sub_dependency(scoped_sub_package_dir, download_dir)
+                        else:
+                            self.pack_sub_dependency(sub_package_dir, download_dir)
+
         except subprocess.CalledProcessError as e:
             print(f"Error downloading NPM package {package_name}: {e}")
             download.status = DownloadStatus.FAILED
@@ -63,7 +88,7 @@ class NpmPackageProcessor:
             return
 
         download.package_dir = download_dir  # Save the package directory for later use
-        
+            
 
     async def packaging_step(self, download: HyperloopDownload):
         """Create a tarball of the downloaded NPM package tarballs."""
@@ -73,6 +98,12 @@ class NpmPackageProcessor:
         tarball_path = os.path.join(self.temp_dir, tarball_name)
 
         print(f"Step 2: Creating tarball for NPM package {package_name}...")
+
+        # Remove the node_modules directory if it exists
+        node_modules_dir = os.path.join(download.package_dir, "node_modules")
+        if os.path.exists(node_modules_dir):
+            print(f"Removing node_modules directory at {node_modules_dir}")
+            shutil.rmtree(node_modules_dir)
 
         try:
             # Create the tarball from the downloaded tarballs
@@ -98,7 +129,7 @@ class NpmPackageProcessor:
 
         try:
             # Use the TarballSender to send the tarball, passing both dependency and type
-            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
+            response = self.tarball_sender.send_tarball(tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
             else:
@@ -108,6 +139,21 @@ class NpmPackageProcessor:
 
         # Publish the final status using the common status publisher
         await publish_status_update(self.rabbitmq, self.status_queue, download)
+    
+    def pack_sub_dependency(self, package_dir, download_dir):
+        """Packs a sub-dependency as a tarball."""
+        try:
+            package_name = os.path.basename(package_dir)
+            print(f"Packing sub-dependency {package_name}...")
+
+            subprocess.run(
+                ["npm", "pack", package_dir],
+                check=True,
+                cwd=download_dir
+            )
+            print(f"Sub-dependency {package_name} packed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error packing sub-dependency {package_name}: {e}")
     
     def cleanup_temp_files(self, download: HyperloopDownload):
         """Clean up the temporary files and tarball after processing."""

@@ -1,4 +1,5 @@
 import os
+import shutil
 import requests
 import tarfile
 import yaml
@@ -15,7 +16,7 @@ class HelmChartProcessor:
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
         self.temp_dir = "/tmp/helm-charts/"  # Directory to store downloaded Helm charts
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")  # Initialize TarballSender
+        self.tarball_sender = NiFiUploader()  # Initialize TarballSender
 
         # Ensure the temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -28,6 +29,8 @@ class HelmChartProcessor:
         await self.packaging_step(download)
         # Sending step
         await self.sending_step(download)
+
+        self.cleanup_temp_files(download)
 
     async def download_step(self, download: HyperloopDownload):
         """Download the Helm chart tarballs from the index.yaml and extract Docker images."""
@@ -92,7 +95,16 @@ class HelmChartProcessor:
 
     async def extract_docker_images(self, chart_dir):
         """Extract Docker images from Helm chart templates and send them via HTTP POST."""
-        templates_dir = os.path.join(chart_dir, "templates")
+        # List all subdirectories in the chart_dir
+        subdirs = [d for d in os.listdir(chart_dir) if os.path.isdir(os.path.join(chart_dir, d))]
+
+        if not subdirs:
+            print(f"No subdirectories found in the chart at {chart_dir}")
+            return
+    
+        # Assuming there's only one chart directory
+        chart_subdir = os.path.join(chart_dir, subdirs[0])
+        templates_dir = os.path.join(chart_subdir, "templates")
 
         if not os.path.exists(templates_dir):
             print(f"No templates directory found in the chart at {chart_dir}")
@@ -167,7 +179,7 @@ class HelmChartProcessor:
 
         try:
             # Use the TarballSender to send the tarball, passing both dependency (index.yaml URL) and type
-            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
+            response = self.tarball_sender.send_tarball(tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
             else:

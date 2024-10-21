@@ -1,11 +1,12 @@
+import os
 from fastapi import Response
 import requests
 
 from app.models.hyperloop_download import HyperloopDownload
 
 class NiFiUploader:
-    def __init__(self, endpoint_url):
-        self.endpoint_url = endpoint_url
+    def __init__(self):
+        self.endpoint_url = os.getenv("NIFI_LISTEN_HTTP_ENDPONT", "http://localhost:9099/hyperloop")
 
     def send_tarball(self, tarball_path: str, dependency: HyperloopDownload) -> Response:
         """
@@ -23,8 +24,9 @@ class NiFiUploader:
 
         try:
             with open(tarball_path, "rb") as tarball:
+                filename = os.path.basename(tarball_path)
                 # Send the tarball via HTTP POST
-                response = requests.post(self.endpoint_url, headers=headers, files={"file": tarball})
+                response = requests.post(self.endpoint_url, headers=headers, files={"file": (filename, tarball)})
 
             if response.status_code == 200:
                 print(f"Tarball {tarball_path} sent successfully!")

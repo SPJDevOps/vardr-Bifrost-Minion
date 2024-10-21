@@ -12,7 +12,7 @@ class FileDownloadProcessor:
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
         self.temp_dir = "/tmp/file-downloads/"  # Directory to store downloaded files
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")  # Initialize TarballSender
+        self.tarball_sender = NiFiUploader()  # Initialize TarballSender
 
         # Ensure the temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -95,7 +95,7 @@ class FileDownloadProcessor:
 
         try:
             # Use the TarballSender to send the tarball, passing both dependency (URL) and type
-            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
+            response = self.tarball_sender.send_tarball(tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
             else:

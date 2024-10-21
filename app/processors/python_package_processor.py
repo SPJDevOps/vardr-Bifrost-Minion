@@ -13,7 +13,7 @@ class PythonPackageProcessor:
         self.rabbitmq = rabbitmq
         self.status_queue = status_queue
         self.temp_dir = "/tmp/python-packages/"  # Directory to store downloaded wheels
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")
+        self.tarball_sender = NiFiUploader()
 
         # Ensure the temp directory exists
         if not os.path.exists(self.temp_dir):
@@ -46,7 +46,7 @@ class PythonPackageProcessor:
         try:
             # Use pip to download the package and its dependencies for Python 3.11 without installing
             subprocess.run(
-                ["pip", "download", package_name, "--python-version", "3.11", "--dest", download_dir],
+                ["pip", "download", package_name, "--python-version", "3.11", "--dest", download_dir, "--only-binary=:all:", "--platform", "manylinux2014_x86_64"],
                 check=True
             )
             print(f"Python package {package_name} downloaded successfully.")
@@ -94,7 +94,7 @@ class PythonPackageProcessor:
 
         try:
             # Use the TarballSender to send the tarball, passing both dependency and type
-            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
+            response = self.tarball_sender.send_tarball(tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
             else:

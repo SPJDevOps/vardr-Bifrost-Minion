@@ -1,14 +1,15 @@
 # app/main.py
 import asyncio
 from contextlib import asynccontextmanager
+import os
 from fastapi import FastAPI
 from app.rabbitmq.rabbitmq import RabbitMQ
 from app.rabbitmq.rabbit_consumer import Consumer
 from app.rabbitmq.rabbit_publisher import Publisher
 
 app = FastAPI()
-rabbitmq = RabbitMQ("amqp://guest:guest@localhost:5672/")  # Adjust the URL as needed
-consumer = Consumer(rabbitmq, 'private.hyperloop.download_requests', 'private.hyperloop.download_status')
+rabbitmq = RabbitMQ(os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost:5672/"))  # Adjust the URL as needed
+consumer = Consumer(rabbitmq, os.getenv("RABBITMQ_DOWNLOAD_REQUEST_QUEUE", "private.hyperloop.download_requests"), os.getenv('RABBITMQ_DOWNLOAD_STATUS_QUEUE', 'private.hyperloop.download_status'))
 publisher = Publisher(rabbitmq)
 
 # Define an async context manager for handling startup and shutdown events

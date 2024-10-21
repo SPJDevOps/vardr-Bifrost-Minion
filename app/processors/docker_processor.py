@@ -13,7 +13,7 @@ class DockerProcessor:
         self.status_queue = status_queue
         self.docker_client = docker.from_env()
         self.temp_dir = "/tmp/docker-images/"
-        self.tarball_sender = NiFiUploader("http://localhost:9998/")
+        self.tarball_sender = NiFiUploader()
 
         # Ensure the directory exists
         if not os.path.exists(self.temp_dir):
@@ -80,7 +80,7 @@ class DockerProcessor:
         # Use the TarballSender to send the tarball, passing both dependency and type
         tarball_path = download.tarball_path
         try:
-            response = self.tarball_sender.send_tarball(tarball_path, download.dependency, download.type)
+            response = self.tarball_sender.send_tarball(tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
             else:

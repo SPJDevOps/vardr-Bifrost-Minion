@@ -5,7 +5,7 @@ from app.models.download_status import DownloadStatus
 
 @dataclass
 class HyperloopDownload:
-    id: int = 0  # Default ID (Auto-incremented, but we'll handle that elsewhere)
+    id: int = 0  
     type: str = field(default_factory=str)
     dependency: str = field(default_factory=str)
     status: DownloadStatus = DownloadStatus.STARTED  # Default status is STARTED
