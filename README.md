@@ -277,3 +277,251 @@ For questions or support, please open an issue or contact the maintainers.
 # Acknowledgments
 
 Thank you for using this application. Contributions are welcome!
+
+# Download Minion
+
+A FastStream-based download processing service that handles various types of dependencies and packages.
+
+## Architecture
+
+This application uses **FastStream** with **RabbitMQ** for message processing, which provides:
+
+- **Simplified Message Handling**: No need for manual RabbitMQ connection management
+- **Automatic Message Routing**: FastStream handles message routing and processing
+- **Built-in Error Handling**: Automatic retry and error handling mechanisms
+- **Async/Await Support**: Full async support for better performance
+- **Smart Error Handling**: Different error types are handled appropriately (reject vs retry)
+- **Clean Architecture**: BaseProcessor pattern eliminates code duplication
+
+## Features
+
+The service can process the following types of downloads:
+
+- **DOCKER**: Docker images (pulls, saves as tarball)
+- **MAVEN**: Maven artifacts and dependencies
+- **PYTHON**: Python packages and wheels
+- **NPM**: NPM packages and dependencies
+- **FILE**: Direct file downloads from URLs
+- **HELM**: Helm charts with Docker image extraction
+- **WEBSITE**: Website to PDF conversion
+
+## Clean Architecture
+
+The application uses a **BaseProcessor** pattern to eliminate code duplication:
+
+### BaseProcessor Class
+```python
+class BaseProcessor(ABC):
+    """Base class for all download processors with common functionality"""
+    
+    async def process(self, download):
+        # Common processing pipeline for all processors
+        await self.download_step(download)
+        await self.packaging_step(download)
+        await self.sending_step(download)
+        self.cleanup_temp_files(download)
+    
+    @abstractmethod
+    async def _download_dependency(self, download):
+        # Each processor implements its specific download logic
+        pass
+```
+
+### Benefits of BaseProcessor Pattern
+- **🔄 Consistent Processing**: All processors follow the same 3-step pipeline
+- **📦 Automatic Packaging**: Base class handles tarball creation
+- **📤 Automatic Sending**: Base class handles NiFi upload
+- **🧹 Automatic Cleanup**: Base class handles file cleanup
+- **📊 Status Updates**: Base class handles status publishing
+- **🎯 Error Handling**: Base class handles common error scenarios
+
+### Processor Implementation
+Each processor only needs to implement its specific download logic:
+
+```python
+class DockerProcessor(BaseProcessor):
+    async def _download_dependency(self, download):
+        # Only Docker-specific logic here
+        docker_image = download.dependency
+        self.docker_client.images.pull(docker_image)
+        # Save as tarball...
+```
+
+## Error Handling
+
+The application implements intelligent error handling with different strategies:
+
+### Message Rejection (No Retry)
+Messages are **rejected** (not retried) for:
+- **Invalid download type**: Unknown processor type
+- **Invalid input format**: Malformed Maven coordinates, invalid URLs
+- **Dependency not found**: Non-existent Docker images, Maven artifacts, etc.
+
+### Message Retry (Negative Acknowledgment)
+Messages are **retried** for:
+- **Network errors**: Connection timeouts, temporary network issues
+- **Service errors**: Docker API errors, Maven repository issues
+- **Internal errors**: Unexpected exceptions, system errors
+
+### Error Types
+
+```python
+# Reject immediately (no retry)
+class UserInputError(Exception):
+    """Invalid user input - reject message"""
+
+class DependencyNotFoundError(Exception):
+    """Dependency doesn't exist - reject message"""
+
+# Retry later
+class InternalError(Exception):
+    """Internal processing error - retry message"""
+```
+
+## Setup
+
+### Prerequisites
+
+- Python 3.8+
+- RabbitMQ server
+- Docker (for Docker image processing)
+- Node.js/npm (for NPM package processing)
+- Maven (for Maven artifact processing)
+
+### Installation
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Set environment variables (optional):
+```bash
+export RABBITMQ_HOST="amqp://guest:guest@localhost:5672/"
+export RABBITMQ_DOWNLOAD_REQUEST_QUEUE="private.hyperloop.download_requests"
+export RABBITMQ_DOWNLOAD_STATUS_QUEUE="private.hyperloop.download_status"
+```
+
+## Running the Application
+
+### Method 1: Using the run script
+```bash
+python run.py
+```
+
+### Method 2: Using FastStream CLI
+```bash
+faststream run app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Method 3: Using Uvicorn directly
+```bash
+uvicorn app.main:fastapi_app --host 0.0.0.0 --port 8000 --reload
+```
+
+## API Endpoints
+
+- `GET /`: Health check endpoint
+- `POST /publish`: Publish a message to the download request queue
+
+## Message Format
+
+Send messages to the download request queue in this format:
+
+```json
+{
+  "id": 1,
+  "type": "DOCKER",
+  "dependency": "nginx:latest",
+  "status": "STARTED",
+  "date": "2024-01-01T00:00:00"
+}
+```
+
+## Queue Structure
+
+- **Download Request Queue**: Receives download requests
+- **Download Status Queue**: Publishes status updates
+
+## Processing Flow
+
+1. Message received on download request queue
+2. FastStream automatically routes to appropriate processor
+3. Processor downloads and packages the dependency
+4. Status updates published to status queue
+5. Final tarball sent to NiFi endpoint
+
+## Testing Error Handling
+
+Run the test script to see how different error scenarios are handled:
+
+```bash
+python test_error_handling.py
+```
+
+This will demonstrate:
+- ✅ Valid messages (processed successfully)
+- ❌ User input errors (rejected immediately)
+- ❌ Dependency not found errors (rejected immediately)
+- ⚠️ Internal errors (retried later)
+
+## Benefits of FastStream + BaseProcessor
+
+- **Reduced Code**: Eliminated ~200 lines of manual RabbitMQ setup
+- **Eliminated Duplication**: BaseProcessor pattern reduces processor code by ~80%
+- **Better Error Handling**: Automatic retry and dead letter queues
+- **Type Safety**: Better type hints and validation
+- **Simplified Testing**: Easier to test with FastStream's testing utilities
+- **Performance**: Optimized async processing
+- **Smart Error Handling**: Different strategies for different error types
+- **Maintainability**: Single place to change common logic
+
+## Development
+
+The application structure is now much cleaner:
+
+```
+app/
+├── main.py                    # FastStream app configuration
+├── processors/
+│   ├── base_processor.py      # Base class with common functionality
+│   ├── download_router.py     # FastStream router with error handling
+│   ├── docker_processor.py    # Only Docker-specific logic (~30 lines)
+│   ├── maven_processor.py     # Only Maven-specific logic (~30 lines)
+│   ├── python_package_processor.py
+│   ├── npm_package_processor.py
+│   ├── file_download_processor.py
+│   ├── helm_chart_processor.py
+│   └── website_pdf_processor.py
+├── models/
+│   ├── download_status.py
+│   └── hyperloop_download.py
+└── helpers/
+    └── nifi_uploader.py
+```
+
+## Code Reduction
+
+### Before (Original Processors)
+- **Docker Processor**: ~112 lines
+- **Maven Processor**: ~177 lines
+- **Python Processor**: ~121 lines
+- **Total**: ~410 lines with lots of duplication
+
+### After (BaseProcessor Pattern)
+- **BaseProcessor**: ~120 lines (shared functionality)
+- **Docker Processor**: ~45 lines (only Docker-specific logic)
+- **Maven Processor**: ~35 lines (only Maven-specific logic)
+- **Python Processor**: ~25 lines (only Python-specific logic)
+- **Total**: ~225 lines (45% reduction, no duplication)
+
+## Monitoring
+
+FastStream provides built-in monitoring and observability features. Check the logs for processing status and any errors.
+
+### Error Logging
+
+The application logs different error types with appropriate actions:
+- `User input error - rejecting message`: Message rejected, no retry
+- `Internal error - will retry`: Message will be retried later
+- `Unexpected error - will retry`: Message will be retried later

@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-aio-pika
+faststream[rabbit]
 docker 
 requests
 pyyaml
+pyppeteer

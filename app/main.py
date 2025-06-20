@@ -1,34 +1,37 @@
 # app/main.py
-import asyncio
-from contextlib import asynccontextmanager
 import os
 from fastapi import FastAPI
-from app.rabbitmq.rabbitmq import RabbitMQ
-from app.rabbitmq.rabbit_consumer import Consumer
-from app.rabbitmq.rabbit_publisher import Publisher
+from faststream import FastStream
+from faststream.rabbit import RabbitBroker, RabbitQueue
+from app.processors.download_router import download_router
 
-app = FastAPI()
-rabbitmq = RabbitMQ(os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost:5672/"))  # Adjust the URL as needed
-consumer = Consumer(rabbitmq, os.getenv("RABBITMQ_DOWNLOAD_REQUEST_QUEUE", "private.hyperloop.download_requests"), os.getenv('RABBITMQ_DOWNLOAD_STATUS_QUEUE', 'private.hyperloop.download_status'))
-publisher = Publisher(rabbitmq)
+# Create FastStream app with RabbitMQ broker
+broker = RabbitBroker(
+    os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost:5672/")
+)
 
-# Define an async context manager for handling startup and shutdown events
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup event
-    await rabbitmq.connect()
-    asyncio.create_task(consumer.start_consuming())
-    yield
-    # Shutdown event
-    await rabbitmq.close()
+# Create FastStream app
+app = FastStream(broker)
 
-app = FastAPI(lifespan=lifespan)
+# Create FastAPI app
+fastapi_app = FastAPI()
 
-@app.get("/")
+# Include the download router
+app.include_router(download_router)
+
+# Add FastAPI routes
+@fastapi_app.get("/")
 async def read_root():
     return {"Hello": "World"}
 
-@app.post("/publish")
+@fastapi_app.post("/publish")
 async def publish_message(message: str):
-    await publisher.publish_message('first_queue', message)
+    # Publish to the download request queue
+    await broker.publish(
+        message, 
+        queue=os.getenv("RABBITMQ_DOWNLOAD_REQUEST_QUEUE", "private.hyperloop.download_requests")
+    )
     return {"status": "Message published"}
+
+# Mount FastAPI app to FastStream
+app.mount_app(fastapi_app)
