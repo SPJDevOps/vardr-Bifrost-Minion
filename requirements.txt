@@ -1,7 +1,6 @@
-fastapi
-uvicorn
 faststream[rabbit]
 docker 
 requests
+aiohttp
 pyyaml
 pyppeteer

@@ -1,7 +1,7 @@
 import os
-import subprocess
+import asyncio
 from app.processors.base_processor import BaseProcessor
-from app.processors.download_router import DependencyNotFoundError, InternalError
+from app.models.exceptions import DependencyNotFoundError, InternalError
 
 
 class PythonPackageProcessor(BaseProcessor):
@@ -20,15 +20,32 @@ class PythonPackageProcessor(BaseProcessor):
         print(f"Downloading Python package {package_name} and its dependencies...")
 
         try:
-            subprocess.run(
-                ["pip", "download", package_name, "--python-version", "3.11", "--dest", download_dir, "--only-binary=:all:", "--platform", "manylinux2014_x86_64"],
-                check=True
+            # Use asyncio.create_subprocess_exec for non-blocking subprocess calls
+            process = await asyncio.create_subprocess_exec(
+                "pip", "download", package_name, 
+                "--python-version", "3.11", 
+                "--dest", download_dir, 
+                "--only-binary=:all:", 
+                "--platform", "manylinux2014_x86_64",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                stderr_text = stderr.decode()
+                if "Could not find a version" in stderr_text or "No matching distribution" in stderr_text:
+                    raise DependencyNotFoundError(f"Python package {package_name} does not exist")
+                else:
+                    raise InternalError(f"Python package download error: {stderr_text}")
+                    
             print(f"Python package {package_name} downloaded successfully.")
             download.package_dir = download_dir
             
-        except subprocess.CalledProcessError as e:
-            if "Could not find a version" in str(e) or "No matching distribution" in str(e):
-                raise DependencyNotFoundError(f"Python package {package_name} does not exist")
-            else:
-                raise InternalError(f"Python package download error: {str(e)}") 
+        except asyncio.TimeoutError:
+            raise InternalError(f"Python package download timeout for {package_name}")
+        except Exception as e:
+            if isinstance(e, (DependencyNotFoundError, InternalError)):
+                raise
+            raise InternalError(f"Python package download error: {str(e)}") 

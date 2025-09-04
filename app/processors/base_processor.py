@@ -1,11 +1,24 @@
+"""
+Base processor class providing common functionality for all download processors.
+"""
+
+import asyncio
+import logging
 import os
+import shutil
 import tarfile
+import tempfile
 from abc import ABC, abstractmethod
-from faststream.rabbit import RabbitBroker
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+from faststream import Logger
+from faststream.rabbit import RabbitBroker, RabbitQueue, RabbitMessage
+
 from app.helpers.nifi_uploader import NiFiUploader
 from app.models.download_status import DownloadStatus
 from app.models.hyperloop_download import HyperloopDownload
-from app.processors.download_router import DependencyNotFoundError, InternalError
+from app.models.exceptions import UserInputError, DependencyNotFoundError, InternalError
 
 
 class BaseProcessor(ABC):
@@ -60,8 +73,12 @@ class BaseProcessor(ABC):
         await self.publish_status_update(download)
         
         try:
-            tarball_path = await self._create_tarball(download)
-            download.tarball_path = tarball_path
+            # Skip packaging if tarball already exists (e.g., Docker processor)
+            if not hasattr(download, 'tarball_path') or not download.tarball_path:
+                tarball_path = await self._create_tarball(download)
+                download.tarball_path = tarball_path
+            else:
+                print(f"Tarball already created at {download.tarball_path}, skipping packaging step")
         except Exception as e:
             download.status = DownloadStatus.FAILED
             await self.publish_status_update(download)
@@ -70,9 +87,11 @@ class BaseProcessor(ABC):
     async def sending_step(self, download: HyperloopDownload):
         """Sending step with common error handling"""
         try:
-            response = self.tarball_sender.send_tarball(download.tarball_path, download)
+            response = await self.tarball_sender.send_tarball(download.tarball_path, download)
             if response.status_code == 200:
                 download.status = DownloadStatus.DONE
+                # Clean up tarball only after successful upload
+                self.cleanup_tarball(download)
             else:
                 download.status = DownloadStatus.FAILED
                 raise InternalError(f"NiFi upload failed with status code: {response.status_code}")
@@ -81,6 +100,9 @@ class BaseProcessor(ABC):
             raise InternalError(f"Sending error: {str(e)}")
         finally:
             await self.publish_status_update(download)
+            # Clean up tarball in case of failure (if it still exists)
+            if download.status == DownloadStatus.FAILED:
+                self.cleanup_tarball(download)
 
     async def _create_tarball(self, download: HyperloopDownload) -> str:
         """Create a tarball from the downloaded content"""
@@ -90,6 +112,15 @@ class BaseProcessor(ABC):
         
         print(f"Creating tarball for {download.type} dependency...")
         
+        # Run tarball creation in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._create_tarball_sync, tarball_path, download)
+        
+        print(f"Tarball created at {tarball_path}")
+        return tarball_path
+
+    def _create_tarball_sync(self, tarball_path: str, download: HyperloopDownload):
+        """Synchronous tarball creation to be run in thread pool"""
         with tarfile.open(tarball_path, "w") as tarball:
             if hasattr(download, 'package_dir') and os.path.exists(download.package_dir):
                 # Directory-based content
@@ -99,9 +130,6 @@ class BaseProcessor(ABC):
                 tarball.add(download.file_path, arcname=os.path.basename(download.file_path))
             else:
                 raise InternalError("No content to package into tarball")
-        
-        print(f"Tarball created at {tarball_path}")
-        return tarball_path
 
     def cleanup_temp_files(self, download: HyperloopDownload):
         """Clean up temporary files and directories"""
@@ -112,18 +140,27 @@ class BaseProcessor(ABC):
                 import shutil
                 shutil.rmtree(download.package_dir)
             
-            # Clean up single file
+            # Clean up single file (but NOT if it's the same as tarball_path)
             if hasattr(download, 'file_path') and os.path.exists(download.file_path):
-                print(f"Cleaning up file at {download.file_path}")
-                os.remove(download.file_path)
+                # Don't delete if this file_path is the same as the tarball we're about to upload
+                if not hasattr(download, 'tarball_path') or download.file_path != download.tarball_path:
+                    print(f"Cleaning up file at {download.file_path}")
+                    os.remove(download.file_path)
             
-            # Clean up tarball
-            if hasattr(download, 'tarball_path') and os.path.exists(download.tarball_path):
-                print(f"Removing tarball at {download.tarball_path}")
-                os.remove(download.tarball_path)
+            # DON'T clean up tarball here - it will be cleaned up after successful upload
+            # The tarball cleanup should happen in the sending_step after upload completes
                 
         except Exception as e:
             print(f"Error during cleanup: {e}")
+
+    def cleanup_tarball(self, download: HyperloopDownload):
+        """Clean up tarball after successful upload - called separately"""
+        try:
+            if hasattr(download, 'tarball_path') and os.path.exists(download.tarball_path):
+                print(f"Removing tarball at {download.tarball_path}")
+                os.remove(download.tarball_path)
+        except Exception as e:
+            print(f"Error cleaning up tarball: {e}")
 
     def sanitize_filename(self, filename: str) -> str:
         """Sanitize filename for safe file saving"""

@@ -1,33 +1,65 @@
-# Step 1: Use an official Python runtime as a base image
-FROM python:3.11-slim
+# Optimized Dockerfile with Python 3.13 and Node.js 22
+FROM nikolaik/python-nodejs:python3.13-nodejs22
 
-# Step 2: Set environment variables to ensure Python output is sent straight to the terminal
+# Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Step 3: Install Node.js and NPM (to ensure NPM is available)
-# Use curl to fetch and install Node.js and NPM
-RUN apt-get update && apt-get install -y curl gnupg2 \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+# Create non-root user for security
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser
+
+# Install system dependencies and update npm in a single layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Essential tools
+    curl \
+    ca-certificates \
+    # Java for Maven
+    openjdk-17-jre-headless \
+    # Maven
+    maven \
+    # Update npm to latest version
     && npm install -g npm@latest \
-    && apt-get install -y maven \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    # Cleanup to reduce image size
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/* \
+    && npm cache clean --force
 
-# Step 4: Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Step 5: Copy the requirements file and install dependencies
-COPY requirements.txt /app/
+# Copy requirements first for better caching
+COPY requirements.txt .
 
-# Install dependencies using pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    # Remove pip cache and temporary files
+    rm -rf ~/.cache/pip && \
+    find /usr/local -depth \( -type d -a -name test -o -name tests \) -exec rm -rf '{}' +
 
-# Step 6: Copy the entire application code into the working directory
-COPY . /app/
+# Copy application code
+COPY . .
 
-# Step 7: Expose the port FastAPI will be running on (adjust if you're using a different port)
-EXPOSE 8000
+# Change ownership to non-root user
+RUN chown -R appuser:appuser /app
 
-# Step 8: Command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Create temp directories with proper permissions
+RUN mkdir -p /tmp/docker-images /tmp/maven-packages /tmp/python-packages \
+    /tmp/npm-packages /tmp/file-downloads /tmp/helm-charts /tmp/website-pdfs && \
+    chown -R appuser:appuser /tmp
+
+# Switch to non-root user
+USER appuser
+
+# Health check for the application
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import app.main; print('Health check passed')" || exit 1
+
+# Command to run the FastStream application
+CMD ["python", "run.py"]

@@ -1,7 +1,7 @@
 import os
-import subprocess
+import asyncio
 from app.processors.base_processor import BaseProcessor
-from app.processors.download_router import DependencyNotFoundError, InternalError
+from app.models.exceptions import DependencyNotFoundError, InternalError
 
 
 class MavenProcessor(BaseProcessor):
@@ -26,24 +26,32 @@ class MavenProcessor(BaseProcessor):
         print(f"Downloading Maven artifact and dependencies for {dependency}...")
 
         try:
-            result = subprocess.run(
-                [
-                    "mvn",
-                    "dependency:get",
-                    "-Dartifact=" + dependency,
-                    "-Dmaven.repo.local=" + download_dir,
-                    "-DincludeScope=runtime",
-                ],
-                check=True,
-                capture_output=True,
-                text=True
+            # Use asyncio.create_subprocess_exec for non-blocking subprocess calls
+            process = await asyncio.create_subprocess_exec(
+                "mvn",
+                "dependency:get",
+                "-Dartifact=" + dependency,
+                "-Dmaven.repo.local=" + download_dir,
+                "-DincludeScope=runtime",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                stderr_text = stderr.decode()
+                # Check if it's a "not found" error
+                if "Could not find artifact" in stderr_text or "not found" in stderr_text.lower():
+                    raise DependencyNotFoundError(f"Maven artifact {dependency} does not exist")
+                else:
+                    raise InternalError(f"Maven download error: {stderr_text}")
 
             download.package_dir = download_dir
             
-        except subprocess.CalledProcessError as e:
-            # Check if it's a "not found" error
-            if "Could not find artifact" in e.stderr or "not found" in e.stderr.lower():
-                raise DependencyNotFoundError(f"Maven artifact {dependency} does not exist")
-            else:
-                raise InternalError(f"Maven download error: {e.stderr}") 
+        except asyncio.TimeoutError:
+            raise InternalError(f"Maven download timeout for {dependency}")
+        except Exception as e:
+            if isinstance(e, (DependencyNotFoundError, InternalError)):
+                raise
+            raise InternalError(f"Maven download error: {str(e)}") 

@@ -2,7 +2,7 @@ import os
 from urllib.parse import urlparse
 from pyppeteer import launch
 from app.processors.base_processor import BaseProcessor
-from app.processors.download_router import DependencyNotFoundError, InternalError
+from app.models.exceptions import DependencyNotFoundError, InternalError
 
 
 class WebsitePdfProcessor(BaseProcessor):
@@ -18,10 +18,24 @@ class WebsitePdfProcessor(BaseProcessor):
         print(f"Converting website {url} to PDF...")
 
         try:
-            browser = await launch()
+            # Launch browser with longer timeout for page loads
+            browser = await launch({
+                'args': ['--no-sandbox', '--disable-setuid-sandbox'],
+                'timeout': 60000  # 1 minute timeout for browser launch
+            })
             page = await browser.newPage()
-            await page.goto(url, waitUntil='networkidle0')
-            await page.pdf({'path': pdf_path, 'format': 'A4'})
+            
+            # Set longer timeout for page navigation
+            await page.goto(url, {
+                'waitUntil': 'networkidle0',
+                'timeout': 120000  # 2 minute timeout for page load
+            })
+            
+            await page.pdf({
+                'path': pdf_path, 
+                'format': 'A4',
+                'timeout': 60000  # 1 minute timeout for PDF generation
+            })
             await browser.close()
             
             print(f"Website {url} converted to PDF successfully.")

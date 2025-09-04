@@ -1,31 +1,30 @@
+"""
+Download router using FastStream for handling download requests.
+"""
+
+import asyncio
+import logging
 import os
 import json
-from faststream import ContextRepo, Logger
+from typing import Dict, Any
+
+from faststream import Logger, ContextRepo
 from faststream.rabbit import RabbitBroker, RabbitQueue, RabbitMessage
+
 from app.models.hyperloop_download import HyperloopDownload
+from app.models.exceptions import UserInputError, DependencyNotFoundError, InternalError
 from app.processors.docker_processor import DockerProcessor
-from app.processors.file_download_processor import FileDownloadProcessor
-from app.processors.helm_chart_processor import HelmChartProcessor
 from app.processors.maven_processor import MavenProcessor
-from app.processors.npm_package_processor import NpmPackageProcessor
 from app.processors.python_package_processor import PythonPackageProcessor
+from app.processors.file_download_processor import FileDownloadProcessor
+from app.processors.npm_package_processor import NpmPackageProcessor
+from app.processors.helm_chart_processor import HelmChartProcessor
 from app.processors.website_pdf_processor import WebsitePdfProcessor
 
-# Custom exceptions for different error types
-class UserInputError(Exception):
-    """Error due to invalid user input - should reject message"""
-    pass
-
-class DependencyNotFoundError(Exception):
-    """Error when dependency doesn't exist - should reject message"""
-    pass
-
-class InternalError(Exception):
-    """Internal processing error - should retry later"""
-    pass
-
-# Create broker instance
-broker = RabbitBroker()
+# Create broker instance with RabbitMQ connection
+broker = RabbitBroker(
+    url=os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost:5672/")
+)
 
 # Create queues
 download_request_queue = RabbitQueue(
@@ -111,5 +110,4 @@ async def publish_status_update(download: HyperloopDownload):
         queue=download_status_queue
     )
 
-# Create the router
-download_router = broker 
+# The broker itself acts as the router with the @broker.subscriber decorators above 

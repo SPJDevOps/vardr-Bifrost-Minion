@@ -1,7 +1,7 @@
 import os
-import subprocess
+import asyncio
 from app.processors.base_processor import BaseProcessor
-from app.processors.download_router import DependencyNotFoundError, InternalError
+from app.models.exceptions import DependencyNotFoundError, InternalError
 
 
 class NpmPackageProcessor(BaseProcessor):
@@ -20,17 +20,29 @@ class NpmPackageProcessor(BaseProcessor):
         print(f"Downloading NPM package {package_spec}...")
 
         try:
-            # Use npm pack to download the tarball
-            subprocess.run(
-                ["npm", "pack", package_spec],
-                check=True,
+            # Use asyncio.create_subprocess_exec for non-blocking subprocess calls
+            process = await asyncio.create_subprocess_exec(
+                "npm", "pack", package_spec,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=download_dir
             )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                stderr_text = stderr.decode()
+                if "404" in stderr_text or "not found" in stderr_text.lower():
+                    raise DependencyNotFoundError(f"NPM package {package_spec} does not exist")
+                else:
+                    raise InternalError(f"NPM package download error: {stderr_text}")
+                    
             print(f"NPM package {package_spec} downloaded successfully.")
             download.package_dir = download_dir
             
-        except subprocess.CalledProcessError as e:
-            if "404" in str(e) or "not found" in str(e).lower():
-                raise DependencyNotFoundError(f"NPM package {package_spec} does not exist")
-            else:
-                raise InternalError(f"NPM package download error: {str(e)}") 
+        except asyncio.TimeoutError:
+            raise InternalError(f"NPM package download timeout for {package_spec}")
+        except Exception as e:
+            if isinstance(e, (DependencyNotFoundError, InternalError)):
+                raise
+            raise InternalError(f"NPM package download error: {str(e)}") 
