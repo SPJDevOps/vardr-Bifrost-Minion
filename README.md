@@ -1,527 +1,470 @@
-# Application README
-
-## Table of Contents
-
-- [Introduction](#introduction)
-- [Prerequisites](#prerequisites)
-- [Setup](#setup)
-  - [Creating a Virtual Environment](#creating-a-virtual-environment)
-  - [Installing Dependencies](#installing-dependencies)
-- [Development](#development)
-  - [Running the Application Locally](#running-the-application-locally)
-- [Docker](#docker)
-  - [Building the Docker Image](#building-the-docker-image)
-  - [Running the Docker Container](#running-the-docker-container)
-- [Application Structure](#application-structure)
-  - [Processors](#processors)
-  - [RabbitMQ Queues](#rabbitmq-queues)
-- [Usage](#usage)
-- [Additional Notes](#additional-notes)
-- [License](#license)
-
----
-
-## Introduction
-
-This application is designed to process various types of dependencies such as Docker images, Maven artifacts, Python packages, NPM packages, Helm charts, and files from URLs. It follows a consistent three-step processing pattern:
-
-1. **Download Step**: Fetch the dependency.
-2. **Packaging Step**: Package the dependency into a tarball.
-3. **Sending Step**: Send the tarball to a specified HTTP endpoint.
-
-The application utilizes RabbitMQ for message queuing, allowing processors to handle tasks asynchronously.
-
----
-
-## Prerequisites
-
-Before setting up and running the application, ensure you have the following installed on your system:
-
-- **Python 3.11** or higher
-- **Docker** and **Docker Compose**
-- **RabbitMQ** (if not using Docker for RabbitMQ)
-- **Node.js** and **NPM** (for NPM package processing)
-- **Helm** (for Helm chart processing)
-- **Git** (for version control)
-
----
-
-## Setup
-
-### Creating a Virtual Environment
-
-It's recommended to use a Python virtual environment to manage dependencies and isolate the project environment.
-
-1. **Create a virtual environment**:
-
-   ```bash
-   python3.11 -m venv env
-   ```
-
-2. **Activate the virtual environment**:
-
-   - On **Linux/macOS**:
-
-     ```bash
-     source env/bin/activate
-     ```
-
-   - On **Windows**:
-
-     ```bash
-     .\env\Scripts\activate
-     ```
-
-### Installing Dependencies
-
-1. **Upgrade `pip`**:
-
-   ```bash
-   pip install --upgrade pip
-   ```
-
-2. **Install Python dependencies**:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Install Node.js and NPM dependencies** (if not already installed):
-
-   - **Linux/macOS**:
-
-     ```bash
-     # Install Node.js and NPM
-     curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
-     sudo apt-get install -y nodejs
-     ```
-
-   - **Windows**:
-
-     Download and install Node.js from the [official website](https://nodejs.org/).
-
-4. **Install Helm** (for Helm chart processing):
-
-   Follow the installation instructions from the [Helm official documentation](https://helm.sh/docs/intro/install/).
-
----
-
-## Development
-
-### Running the Application Locally
-
-To run the application for development purposes:
-
-1. **Ensure RabbitMQ is running**:
-
-   - If you have RabbitMQ installed locally, start the service.
-   - Alternatively, you can run RabbitMQ using Docker:
-
-     ```bash
-     docker run -d --hostname my-rabbit --name some-rabbit -p 5672:5672 rabbitmq:3
-     ```
-
-2. **Set environment variables** (if needed):
-
-   You can configure your application using environment variables or a `.env` file.
-
-3. **Start the application**:
-
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-   The `--reload` flag enables auto-reloading on code changes, which is useful during development.
-
----
-
-## Docker
-
-### Building the Docker Image
-
-To containerize the application using Docker:
-
-1. **Build the Docker image**:
-
-   ```bash
-   docker build -t my-application .
-   ```
-
-   This command builds an image with the tag `my-application` using the `Dockerfile` in the current directory.
-
-### Running the Docker Container
-
-1. **Run the Docker container**:
-
-   ```bash
-   docker run -d \
-       --name my-application-container \
-       -p 8000:8000 \
-       -v /var/run/docker.sock:/var/run/docker.sock \
-       my-application
-   ```
-
-   - `-p 8000:8000`: Maps port 8000 of the container to port 8000 on the host.
-   - `-v /var/run/docker.sock:/var/run/docker.sock`: Mounts the Docker socket to enable Docker operations within the container.
-
-2. **Verify the container is running**:
-
-   ```bash
-   docker ps
-   ```
-
-   You should see `my-application-container` listed and running.
-
----
-
-## Application Structure
-
-### Processors
-
-The application uses processors to handle different types of dependencies. Each processor follows the same three-step pattern:
-
-1. **Download Step**: Handles the downloading of the specified dependency.
-2. **Packaging Step**: Packages the downloaded files into a tarball.
-3. **Sending Step**: Sends the tarball to an HTTP endpoint.
-
-#### Available Processors
-
-- **DockerProcessor**: Handles Docker images.
-- **MavenProcessor**: Handles Maven artifacts.
-- **PythonPackageProcessor**: Handles Python packages.
-- **NpmPackageProcessor**: Handles NPM packages.
-- **FileDownloadProcessor**: Handles file downloads from URLs.
-- **HelmChartProcessor**: Handles Helm charts.
-
-### RabbitMQ Queues
-
-The application uses RabbitMQ for message passing between components.
-
-#### Queues
-
-- **request_queue**: Receives new `HyperloopDownload` tasks.
-- **status_queue**: Receives status updates from processors.
-
-#### Message Flow
-
-1. **Producer**: Sends `HyperloopDownload` messages to `request_queue`.
-2. **Consumer**: Listens to `request_queue` and dispatches tasks to the appropriate processor based on the `type` field.
-3. **Processor**: Processes the task and sends status updates to `status_queue`.
-
----
-
-## Usage
-
-To use the application:
-
-1. **Send a `HyperloopDownload` task**:
-
-   Send a message to `request_queue` or make an HTTP POST request to the `/downloads` endpoint (if available) with a JSON payload:
-
-   ```json
-   {
-     "type": "DOCKER",
-     "dependency": "nginx:latest"
-   }
-   ```
-
-2. **Monitor the status**:
-
-   Listen to `status_queue` to receive status updates or check logs for processing details.
-
-3. **Processing Steps**:
-
-   The processor will:
-
-   - Download the specified dependency.
-   - Package it into a tarball.
-   - Send the tarball to the configured HTTP endpoint.
-
----
-
-## Additional Notes
-
-- **Docker-in-Docker**:
-
-  - The application needs to interact with the Docker daemon to pull Docker images.
-  - We mount the Docker socket from the host into the container using `-v /var/run/docker.sock:/var/run/docker.sock`.
-  - Be aware of the security implications of this approach.
-
-- **Environment Variables**:
-
-  - Configure your application using environment variables or a `.env` file.
-  - Common variables include RabbitMQ connection details and HTTP endpoint URLs.
-
-- **Security Considerations**:
-
-  - Ensure that sensitive information is not hardcoded or exposed.
-  - Use proper authentication and authorization mechanisms where necessary.
-
-- **Logging**:
-
-  - The application prints logs to the console.
-  - Consider integrating a logging framework for better log management.
-
----
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-## Contact
-
-For questions or support, please open an issue or contact the maintainers.
-
-# Acknowledgments
-
-Thank you for using this application. Contributions are welcome!
-
-# Download Minion
-
-A FastStream-based download processing service that handles various types of dependencies and packages.
-
-## Architecture
-
-This application uses **FastStream** with **RabbitMQ** for message processing, which provides:
-
-- **Simplified Message Handling**: No need for manual RabbitMQ connection management
-- **Automatic Message Routing**: FastStream handles message routing and processing
-- **Built-in Error Handling**: Automatic retry and error handling mechanisms
-- **Async/Await Support**: Full async support for better performance
-- **Smart Error Handling**: Different error types are handled appropriately (reject vs retry)
-- **Clean Architecture**: BaseProcessor pattern eliminates code duplication
-
-## Features
-
-The service can process the following types of downloads:
-
-- **DOCKER**: Docker images (pulls, saves as tarball)
-- **MAVEN**: Maven artifacts and dependencies
-- **PYTHON**: Python packages and wheels
-- **NPM**: NPM packages and dependencies
-- **FILE**: Direct file downloads from URLs
-- **HELM**: Helm charts with Docker image extraction
-- **WEBSITE**: Website to PDF conversion
-
-## Clean Architecture
-
-The application uses a **BaseProcessor** pattern to eliminate code duplication:
-
-### BaseProcessor Class
-```python
-class BaseProcessor(ABC):
-    """Base class for all download processors with common functionality"""
+# 🌈 Bifrost-Minion
+
+> **Part of the Vardr Bifrost Ecosystem** - A high-performance dependency download and packaging service
+
+[![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://python.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22-green.svg)](https://nodejs.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com)
+[![FastStream](https://img.shields.io/badge/FastStream-RabbitMQ-orange.svg)](https://faststream.airt.ai)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+## 📋 Table of Contents
+
+- [🌈 Bifrost-Minion](#-bifrost-minion)
+  - [📋 Table of Contents](#-table-of-contents)
+  - [🚀 Overview](#-overview)
+  - [🏗️ Architecture](#️-architecture)
+  - [✨ Features](#-features)
+  - [🛠️ Supported Processors](#️-supported-processors)
+  - [📦 Installation](#-installation)
+    - [🐳 Docker (Recommended)](#-docker-recommended)
+    - [🐍 Local Development](#-local-development)
+  - [⚙️ Configuration](#️-configuration)
+  - [🚀 Quick Start](#-quick-start)
+  - [📊 API Reference](#-api-reference)
+  - [🔧 Development](#-development)
+  - [📁 Project Structure](#-project-structure)
+  - [🔍 Monitoring & Logging](#-monitoring--logging)
+  - [🤝 Contributing](#-contributing)
+  - [📄 License](#-license)
+
+## 🚀 Overview
+
+**Bifrost-Minion** is a specialized microservice within the **Vardr Bifrost** ecosystem, designed to handle the download, packaging, and distribution of various software dependencies. Acting as a bridge between different package ecosystems, it processes requests asynchronously through RabbitMQ and delivers packaged artifacts to downstream systems.
+
+### 🎯 Purpose
+
+The Bifrost-Minion serves as the **dependency acquisition layer** in air-gapped or controlled environments, enabling organizations to:
+
+- **Centralize dependency management** across multiple technology stacks
+- **Package and standardize** artifacts from various sources
+- **Maintain security** through controlled download processes  
+- **Enable offline operations** by pre-downloading dependencies
+
+### 🔄 Processing Pipeline
+
+Each dependency follows a consistent **three-step pipeline**:
+
+1. **📥 Download Step**: Fetch the dependency from its source
+2. **📦 Packaging Step**: Package into a standardized tarball format  
+3. **🚀 Sending Step**: Deliver to the configured HTTP endpoint
+
+For more information about the complete Vardr Bifrost ecosystem, see the [Bifrost API Documentation](https://github.com/SPJDevOps/vardr-Bifrost-API).
+
+## 🏗️ Architecture
+
+Bifrost-Minion uses a **modular processor architecture** built on FastStream and RabbitMQ:
+
+```mermaid
+graph TD
+    A[RabbitMQ Queue] --> B[Download Router]
+    B --> C{Processor Type}
+    C -->|DOCKER| D[Docker Processor]
+    C -->|MAVEN| E[Maven Processor] 
+    C -->|PYTHON| F[Python Processor]
+    C -->|NPM| G[NPM Processor]
+    C -->|HELM| H[Helm Processor]
+    C -->|FILE| I[File Processor]
+    C -->|WEBSITE| J[Website PDF Processor]
     
-    async def process(self, download):
-        # Common processing pipeline for all processors
-        await self.download_step(download)
-        await self.packaging_step(download)
-        await self.sending_step(download)
-        self.cleanup_temp_files(download)
+    D --> K[Base Processor Pipeline]
+    E --> K
+    F --> K
+    G --> K
+    H --> K
+    I --> K
+    J --> K
     
-    @abstractmethod
-    async def _download_dependency(self, download):
-        # Each processor implements its specific download logic
-        pass
+    K --> L[Download Step]
+    L --> M[Package Step]
+    M --> N[Send Step]
+    N --> O[NiFi HTTP Endpoint]
+    
+    K --> P[Status Updates]
+    P --> Q[RabbitMQ Status Queue]
 ```
 
-### Benefits of BaseProcessor Pattern
-- **🔄 Consistent Processing**: All processors follow the same 3-step pipeline
-- **📦 Automatic Packaging**: Base class handles tarball creation
-- **📤 Automatic Sending**: Base class handles NiFi upload
-- **🧹 Automatic Cleanup**: Base class handles file cleanup
-- **📊 Status Updates**: Base class handles status publishing
-- **🎯 Error Handling**: Base class handles common error scenarios
+## ✨ Features
 
-### Processor Implementation
-Each processor only needs to implement its specific download logic:
+- 🚀 **High-Performance Async Processing** - Built on FastStream for maximum throughput
+- 🔄 **Multiple Dependency Types** - Support for 7+ different package ecosystems
+- 🛡️ **Robust Error Handling** - Automatic retry logic with proper error categorization
+- 📦 **Standardized Output** - All artifacts packaged as tarballs for consistency
+- 🔒 **Security-First** - Non-root containers, input validation, and secure defaults
+- 📊 **Comprehensive Monitoring** - Built-in health checks and status reporting
+- 🐳 **Container-Ready** - Optimized Docker images with Python 3.13 + Node.js 22
+- ⚡ **Non-Blocking Operations** - Thread pool execution for CPU-intensive tasks
 
-```python
-class DockerProcessor(BaseProcessor):
-    async def _download_dependency(self, download):
-        # Only Docker-specific logic here
-        docker_image = download.dependency
-        self.docker_client.images.pull(docker_image)
-        # Save as tarball...
-```
+## 🛠️ Supported Processors
 
-## Error Handling
+| Processor | Description | Input Format | Output |
+|-----------|-------------|--------------|--------|
+| **Docker** | Pull and package Docker images | `nginx:latest` | Image tarball |
+| **Maven** | Download Maven artifacts | `org.apache:commons-lang3:3.12.0` | JAR + dependencies |
+| **Python** | Download Python packages | `requests==2.31.0` | Wheel files |
+| **NPM** | Download NPM packages | `express@4.18.2` | Package tarballs |
+| **Helm** | Download Helm charts | `https://charts.helm.sh/stable` | Chart archives |
+| **File** | Download files from URLs | `https://example.com/file.zip` | Raw files |
+| **Website** | Convert websites to PDF | `https://docs.python.org` | PDF documents |
 
-The application implements intelligent error handling with different strategies:
+---
 
-### Message Rejection (No Retry)
-Messages are **rejected** (not retried) for:
-- **Invalid download type**: Unknown processor type
-- **Invalid input format**: Malformed Maven coordinates, invalid URLs
-- **Dependency not found**: Non-existent Docker images, Maven artifacts, etc.
+## 📦 Installation
 
-### Message Retry (Negative Acknowledgment)
-Messages are **retried** for:
-- **Network errors**: Connection timeouts, temporary network issues
-- **Service errors**: Docker API errors, Maven repository issues
-- **Internal errors**: Unexpected exceptions, system errors
+### 🐳 Docker (Recommended)
 
-### Error Types
+The fastest way to get started is using Docker Compose:
 
-```python
-# Reject immediately (no retry)
-class UserInputError(Exception):
-    """Invalid user input - reject message"""
-
-class DependencyNotFoundError(Exception):
-    """Dependency doesn't exist - reject message"""
-
-# Retry later
-class InternalError(Exception):
-    """Internal processing error - retry message"""
-```
-
-## Setup
-
-### Prerequisites
-
-- Python 3.8+
-- RabbitMQ server
-- Docker (for Docker image processing)
-- Node.js/npm (for NPM package processing)
-- Maven (for Maven artifact processing)
-
-### Installation
-
-1. Install dependencies:
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd bifrost-minion
+
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f download-minion
+```
+
+**What's included:**
+- ✅ Bifrost-Minion service
+- ✅ RabbitMQ with management UI
+- ✅ Pre-configured networking
+- ✅ Persistent volumes
+
+### 🐍 Local Development
+
+For development or customization:
+
+```bash
+# Prerequisites
+# - Python 3.13+
+# - Node.js 22+
+# - Java 17+ (for Maven)
+# - Docker (for Docker processor)
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# or
+venv\Scripts\activate     # Windows
+
+# Install dependencies
+
 pip install -r requirements.txt
-```
 
-2. Set environment variables (optional):
-```bash
-export RABBITMQ_HOST="amqp://guest:guest@localhost:5672/"
-export RABBITMQ_DOWNLOAD_REQUEST_QUEUE="private.hyperloop.download_requests"
-export RABBITMQ_DOWNLOAD_STATUS_QUEUE="private.hyperloop.download_status"
-```
-
-## Running the Application
-
-### Method 1: Using the run script
-```bash
+# Run the application
 python run.py
 ```
 
-### Method 2: Using FastStream CLI
+## ⚙️ Configuration
+
+Configure Bifrost-Minion using environment variables:
+
+### 🔧 Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RABBITMQ_HOST` | `amqp://guest:guest@localhost:5672/` | RabbitMQ connection string |
+| `RABBITMQ_DOWNLOAD_REQUEST_QUEUE` | `private.hyperloop.download_requests` | Input queue name |
+| `RABBITMQ_DOWNLOAD_STATUS_QUEUE` | `private.hyperloop.download_status` | Status update queue |
+| `NIFI_LISTEN_HTTP_ENDPONT` | `http://localhost:9099/hyperloop` | Target HTTP endpoint |
+
+### 🐳 Docker Environment
+
 ```bash
-faststream run app.main:app --host 0.0.0.0 --port 8000
+# .env file for docker-compose
+RABBITMQ_HOST=amqp://guest:guest@rabbitmq:5672/
+NIFI_LISTEN_HTTP_ENDPONT=http://nifi:9099/hyperloop
 ```
 
-### Method 3: Using Uvicorn directly
+### 🔒 Security Configuration
+
 ```bash
-uvicorn app.main:fastapi_app --host 0.0.0.0 --port 8000 --reload
+# Production settings
+RABBITMQ_HOST=amqps://user:pass@secure-rabbitmq:5671/
+NIFI_LISTEN_HTTP_ENDPONT=https://secure-nifi:8443/hyperloop
 ```
 
-## API Endpoints
+## 🚀 Quick Start
 
-- `GET /`: Health check endpoint
-- `POST /publish`: Publish a message to the download request queue
+### 1. Start the Services
 
-## Message Format
+```bash
+# Using Docker Compose
+docker-compose up -d
 
-Send messages to the download request queue in this format:
+# Or locally (requires RabbitMQ running)
+python run.py
+```
+
+### 2. Send a Download Request
+
+```bash
+# Example: Download a Docker image
+curl -X POST http://localhost:15672/api/exchanges/%2f/amq.default/publish \
+  -u guest:guest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "properties": {},
+    "routing_key": "private.hyperloop.download_requests",
+    "payload": "{\"type\": \"DOCKER\", \"dependency\": \"nginx:latest\", \"id\": \"req-001\"}"
+  }'
+```
+
+### 3. Monitor Progress
+
+- **RabbitMQ Management**: http://localhost:15672 (guest/guest)
+- **Application Logs**: `docker-compose logs -f download-minion`
+- **Status Queue**: Monitor `private.hyperloop.download_status` for updates
+
+## 📊 API Reference
+
+### Message Format
+
+All download requests follow this JSON structure:
 
 ```json
 {
-  "id": 1,
-  "type": "DOCKER",
-  "dependency": "nginx:latest",
-  "status": "STARTED",
-  "date": "2024-01-01T00:00:00"
+  "type": "DOCKER|MAVEN|PYTHON|NPM|HELM|FILE|WEBSITE",
+  "dependency": "dependency-identifier",
+  "id": "unique-request-id"
 }
 ```
 
-## Queue Structure
+### Request Examples
 
-- **Download Request Queue**: Receives download requests
-- **Download Status Queue**: Publishes status updates
+#### Docker Image
+```json
+{
+  "type": "DOCKER",
+  "dependency": "nginx:1.21-alpine",
+  "id": "docker-nginx-001"
+}
+```
 
-## Processing Flow
+#### Maven Artifact
+```json
+{
+  "type": "MAVEN", 
+  "dependency": "org.springframework:spring-core:5.3.21",
+  "id": "maven-spring-001"
+}
+```
 
-1. Message received on download request queue
-2. FastStream automatically routes to appropriate processor
-3. Processor downloads and packages the dependency
-4. Status updates published to status queue
-5. Final tarball sent to NiFi endpoint
+#### Python Package
+```json
+{
+  "type": "PYTHON",
+  "dependency": "fastapi==0.68.0",
+  "id": "python-fastapi-001"
+}
+```
 
-## Testing Error Handling
+### Status Updates
 
-Run the test script to see how different error scenarios are handled:
+Status updates are published to the status queue with this format:
+
+```json
+{
+  "id": "unique-request-id",
+  "type": "DOCKER",
+  "dependency": "nginx:latest", 
+  "status": "DOWNLOADING|SENDING|DONE|FAILED"
+}
+```
+
+## 🔧 Development
+
+### Local Development Setup
 
 ```bash
-python test_error_handling.py
+# 1. Start RabbitMQ (using Docker)
+docker run -d --name rabbitmq \
+  -p 5672:5672 -p 15672:15672 \
+  rabbitmq:3.13-management-alpine
+
+# 2. Set environment variables
+export RABBITMQ_HOST="amqp://guest:guest@localhost:5672/"
+export NIFI_LISTEN_HTTP_ENDPONT="http://localhost:9099/hyperloop"
+
+# 3. Start the application with auto-reload
+python run.py
 ```
 
-This will demonstrate:
-- ✅ Valid messages (processed successfully)
-- ❌ User input errors (rejected immediately)
-- ❌ Dependency not found errors (rejected immediately)
-- ⚠️ Internal errors (retried later)
+### Testing Individual Processors
 
-## Benefits of FastStream + BaseProcessor
+```bash
+# Test Docker processor
+python -c "
+import asyncio
+from app.processors.docker_processor import DockerProcessor
+from app.models.hyperloop_download import HyperloopDownload
 
-- **Reduced Code**: Eliminated ~200 lines of manual RabbitMQ setup
-- **Eliminated Duplication**: BaseProcessor pattern reduces processor code by ~80%
-- **Better Error Handling**: Automatic retry and dead letter queues
-- **Type Safety**: Better type hints and validation
-- **Simplified Testing**: Easier to test with FastStream's testing utilities
-- **Performance**: Optimized async processing
-- **Smart Error Handling**: Different strategies for different error types
-- **Maintainability**: Single place to change common logic
+async def test():
+    download = HyperloopDownload(type='DOCKER', dependency='hello-world:latest', id='test-001')
+    processor = DockerProcessor(None, 'test-queue')
+    await processor._download_dependency(download)
 
-## Development
-
-The application structure is now much cleaner:
-
-```
-app/
-├── main.py                    # FastStream app configuration
-├── processors/
-│   ├── base_processor.py      # Base class with common functionality
-│   ├── download_router.py     # FastStream router with error handling
-│   ├── docker_processor.py    # Only Docker-specific logic (~30 lines)
-│   ├── maven_processor.py     # Only Maven-specific logic (~30 lines)
-│   ├── python_package_processor.py
-│   ├── npm_package_processor.py
-│   ├── file_download_processor.py
-│   ├── helm_chart_processor.py
-│   └── website_pdf_processor.py
-├── models/
-│   ├── download_status.py
-│   └── hyperloop_download.py
-└── helpers/
-    └── nifi_uploader.py
+asyncio.run(test())
+"
 ```
 
-## Code Reduction
+### Code Quality
 
-### Before (Original Processors)
-- **Docker Processor**: ~112 lines
-- **Maven Processor**: ~177 lines
-- **Python Processor**: ~121 lines
-- **Total**: ~410 lines with lots of duplication
+```bash
+# Install development dependencies
+pip install black flake8 pytest
 
-### After (BaseProcessor Pattern)
-- **BaseProcessor**: ~120 lines (shared functionality)
-- **Docker Processor**: ~45 lines (only Docker-specific logic)
-- **Maven Processor**: ~35 lines (only Maven-specific logic)
-- **Python Processor**: ~25 lines (only Python-specific logic)
-- **Total**: ~225 lines (45% reduction, no duplication)
+# Format code
+black app/
 
-## Monitoring
+# Lint code
+flake8 app/
 
-FastStream provides built-in monitoring and observability features. Check the logs for processing status and any errors.
+# Run tests
+pytest tests/
+```
 
-### Error Logging
+## 📁 Project Structure
 
-The application logs different error types with appropriate actions:
-- `User input error - rejecting message`: Message rejected, no retry
-- `Internal error - will retry`: Message will be retried later
-- `Unexpected error - will retry`: Message will be retried later
+```
+bifrost-minion/
+├── app/
+│   ├── helpers/
+│   │   └── nifi_uploader.py          # HTTP upload functionality
+│   ├── models/
+│   │   ├── download_status.py        # Status enumeration
+│   │   ├── exceptions.py             # Custom exceptions
+│   │   └── hyperloop_download.py     # Download request model
+│   ├── processors/
+│   │   ├── base_processor.py         # Shared processor logic
+│   │   ├── docker_processor.py       # Docker image handling
+│   │   ├── download_router.py        # Message routing
+│   │   ├── file_download_processor.py # File downloads
+│   │   ├── helm_chart_processor.py   # Helm chart handling
+│   │   ├── maven_processor.py        # Maven artifact handling
+│   │   ├── npm_package_processor.py  # NPM package handling
+│   │   ├── python_package_processor.py # Python package handling
+│   │   └── website_pdf_processor.py  # Website to PDF conversion
+│   └── main.py                       # FastStream application
+├── docker-compose.yml               # Development environment
+├── Dockerfile                       # Container definition
+├── requirements.txt                 # Python dependencies
+└── run.py                          # Application entry point
+```
+
+## 🔍 Monitoring & Logging
+
+### Health Checks
+
+The Docker container includes built-in health checks:
+
+```bash
+# Check container health
+docker inspect --format='{{.State.Health.Status}}' bifrost-minion
+```
+
+### Logging
+
+Application logs are structured and include:
+
+- **Request Processing**: Download start/completion
+- **Error Handling**: Detailed error messages with context
+- **Performance Metrics**: Processing times and queue depths
+
+```bash
+# View logs
+docker-compose logs -f download-minion
+
+# Filter specific processor logs
+docker-compose logs download-minion | grep "Docker"
+```
+
+### Metrics
+
+Monitor key metrics:
+
+- **Queue Depth**: RabbitMQ management UI
+- **Processing Time**: Application logs
+- **Success Rate**: Status queue messages
+- **Error Rate**: Failed status updates
+
+## 🤝 Contributing
+
+We welcome contributions to the Bifrost-Minion project! Here's how you can help:
+
+### 🐛 Bug Reports
+
+1. **Check existing issues** before creating new ones
+2. **Use the issue template** and provide detailed information
+3. **Include logs and error messages** when applicable
+
+### 💡 Feature Requests
+
+1. **Describe the use case** and business value
+2. **Provide examples** of the desired functionality  
+3. **Consider compatibility** with the existing architecture
+
+### 🔧 Development Contributions
+
+1. **Fork the repository** and create a feature branch
+2. **Follow code standards**: Black formatting, type hints, docstrings
+3. **Add tests** for new functionality
+4. **Update documentation** as needed
+5. **Submit a pull request** with a clear description
+
+### 🏗️ Adding New Processors
+
+To add support for a new dependency type:
+
+1. **Extend BaseProcessor**: Create a new processor class
+2. **Implement _download_dependency**: Add the download logic
+3. **Add to router**: Register in `download_router.py`
+4. **Add tests**: Ensure functionality works correctly
+5. **Update documentation**: Add to supported processors table
+
+Example processor template:
+
+```python
+from app.processors.base_processor import BaseProcessor
+from app.models.exceptions import DependencyNotFoundError, InternalError
+
+class MyProcessor(BaseProcessor):
+    def __init__(self, broker, status_queue):
+        super().__init__(broker, status_queue, "/tmp/my-processor/")
+    
+    async def _download_dependency(self, download):
+        """Download logic for my processor"""
+        # Implementation here
+        pass
+```
+
+## 📄 License
+
+This project is part of the **Vardr Bifrost** ecosystem and is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🔗 Related Projects
+
+- **[Vardr Bifrost API](https://github.com/SPJDevOps/vardr-Bifrost-API)** - Main API gateway and orchestration layer
+- **Bifrost-UI** - Web interface for managing downloads (coming soon)
+- **Bifrost-Scanner** - Security scanning integration (coming soon)
+
+## 📞 Support
+
+- **Documentation**: [Bifrost API Docs](https://github.com/SPJDevOps/vardr-Bifrost-API/blob/main/README.md)
+- **Issues**: [GitHub Issues](https://github.com/SPJDevOps/vardr-Bifrost-API/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/SPJDevOps/vardr-Bifrost-API/discussions)
+
+---
+
+<div align="center">
+
+**Built with ❤️ for the DevOps community**
+
+*Part of the Vardr Bifrost Ecosystem*
+
+</div>
